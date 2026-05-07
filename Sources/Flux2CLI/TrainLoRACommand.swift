@@ -222,6 +222,7 @@ struct TrainLoRA: AsyncParsableCommand {
         // Configure logging
         if verbose {
             Flux2Debug.enableDebugMode()
+            FluxDebug.isEnabled = true
         }
 
         // Determine if using YAML config or CLI args

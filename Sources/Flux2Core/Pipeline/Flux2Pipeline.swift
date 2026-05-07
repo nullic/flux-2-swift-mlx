@@ -852,8 +852,7 @@ public class Flux2Pipeline: @unchecked Sendable {
                         """
 
                         Flux2Debug.log("Prompt enriched with \(descriptions.count) VLM description(s)")
-                        print("[VLM-Interpret] Enriched prompt:\n\(enrichedPrompt)")
-                        fflush(stdout)
+                        Flux2Debug.info("[VLM-Interpret] Enriched prompt:\n\(enrichedPrompt)")
                     }
 
                     profiler.end("1b. VLM Interpretation")
@@ -888,8 +887,7 @@ public class Flux2Pipeline: @unchecked Sendable {
                         """
 
                         Flux2Debug.log("Prompt enriched with \(descriptions.count) VLM description(s)")
-                        print("[VLM-Interpret] Enriched prompt:\n\(enrichedPrompt)")
-                        fflush(stdout)
+                        Flux2Debug.info("[VLM-Interpret] Enriched prompt:\n\(enrichedPrompt)")
                     }
 
                     // Step 4: Unload Mistral
