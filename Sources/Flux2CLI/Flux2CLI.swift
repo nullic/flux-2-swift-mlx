@@ -79,8 +79,8 @@ struct TextToImage: AsyncParsableCommand {
     @Option(name: .long, help: "Transformer quantization: bf16, qint8, int4")
     var transformerQuant: String = "qint8"
 
-    @Flag(name: .long, help: "Enable debug logs (verbose output)")
-    var debug: Bool = false
+    @Flag(name: .long, help: "Show detailed logs (model loading, config, VLM interpretation)")
+    var verbose: Bool = false
 
     @Flag(name: .long, help: "Enable performance profiling")
     var profile: Bool = false
@@ -119,11 +119,13 @@ struct TextToImage: AsyncParsableCommand {
         // Configure custom models directory
         configureModelsDirectory(modelsDir)
 
-        // Configure debug logging
-        if debug {
+        // Configure logging verbosity
+        if verbose {
             Flux2Debug.enableDebugMode()
+            FluxDebug.isEnabled = true
         } else {
             Flux2Debug.setNormalMode()
+            FluxDebug.isEnabled = false
         }
 
         // Configure profiling
@@ -206,7 +208,7 @@ struct TextToImage: AsyncParsableCommand {
             }
         }
 
-        if debug {
+        if verbose {
             print("Configuration:")
             print("  Model: \(modelVariant.displayName)")
             print("  Text encoder: \(textQuantization.displayName)")
@@ -224,41 +226,37 @@ struct TextToImage: AsyncParsableCommand {
             interpretImagePaths.append(path)
         }
 
-        print("Generating image...")
-        print("  Prompt: \"\(prompt)\"")
-        if !interpretImagePaths.isEmpty {
-            print("  Interpret images: \(interpretImagePaths.count) (VLM will analyze and enrich prompt)")
-            for path in interpretImagePaths {
-                print("    - \(path)")
-            }
-        }
-        if upsamplePrompt {
-            print("  Prompt upsampling: enabled (will enhance prompt with visual details)")
-        }
-        if let loraConfig = loraConfig {
-            print("  LoRA: \(loraConfig.name) (scale: \(loraConfig.effectiveScale))")
-            if let overrides = loraConfig.schedulerOverrides, overrides.hasOverrides {
-                if overrides.customSigmas != nil {
-                    print("    - Custom sigmas: \(overrides.customSigmas!.count) values")
-                }
-                if let recSteps = overrides.numSteps, steps == nil {
-                    print("    - Using recommended steps: \(recSteps)")
-                }
-                if let recGuidance = overrides.guidance, guidance == nil {
-                    print("    - Using recommended guidance: \(recGuidance)")
+        print("Generating \(width)x\(height), \(actualSteps) steps, guidance \(actualGuidance)\(seed.map { ", seed \($0)" } ?? "")...")
+        if verbose {
+            print("  Prompt: \"\(prompt)\"")
+            if !interpretImagePaths.isEmpty {
+                print("  Interpret images: \(interpretImagePaths.count) (VLM will analyze and enrich prompt)")
+                for path in interpretImagePaths {
+                    print("    - \(path)")
                 }
             }
+            if upsamplePrompt {
+                print("  Prompt upsampling: enabled (will enhance prompt with visual details)")
+            }
+            if let loraConfig = loraConfig {
+                print("  LoRA: \(loraConfig.name) (scale: \(loraConfig.effectiveScale))")
+                if let overrides = loraConfig.schedulerOverrides, overrides.hasOverrides {
+                    if overrides.customSigmas != nil {
+                        print("    - Custom sigmas: \(overrides.customSigmas!.count) values")
+                    }
+                    if let recSteps = overrides.numSteps, steps == nil {
+                        print("    - Using recommended steps: \(recSteps)")
+                    }
+                    if let recGuidance = overrides.guidance, guidance == nil {
+                        print("    - Using recommended guidance: \(recGuidance)")
+                    }
+                }
+            }
+            if let checkpointInterval = checkpoint {
+                print("  Checkpoints: every \(checkpointInterval) step(s)")
+            }
+            print()
         }
-        print("  Size: \(width)x\(height)")
-        print("  Steps: \(actualSteps)")
-        print("  Guidance: \(actualGuidance)")
-        if let seed = seed {
-            print("  Seed: \(seed)")
-        }
-        if let checkpointInterval = checkpoint {
-            print("  Checkpoints: every \(checkpointInterval) step(s)")
-        }
-        print()
 
         // Parse VAE variant
         guard let vaeVar = ModelRegistry.VAEVariant(rawValue: vaeVariant) else {
@@ -282,7 +280,9 @@ struct TextToImage: AsyncParsableCommand {
         if let loraConfig = loraConfig {
             do {
                 let info = try pipeline.loadLoRA(loraConfig)
-                print("LoRA loaded: \(info.numLayers) layers, rank \(info.rank), \(String(format: "%.1f", info.memorySizeMB)) MB")
+                if verbose {
+                    print("LoRA loaded: \(info.numLayers) layers, rank \(info.rank), \(String(format: "%.1f", info.memorySizeMB)) MB")
+                }
                 if info.targetModel != .unknown {
                     if info.targetModel.rawValue != modelVariant.rawValue {
                         print("⚠️  Warning: LoRA was trained for \(info.targetModel.rawValue), but using \(modelVariant.rawValue)")
@@ -322,7 +322,9 @@ struct TextToImage: AsyncParsableCommand {
                 atPath: checkpointDir!,
                 withIntermediateDirectories: true
             )
-            print("Checkpoints will be saved to: \(checkpointDir!)")
+            if verbose {
+                print("Checkpoints will be saved to: \(checkpointDir!)")
+            }
         } else {
             checkpointDir = nil
         }
@@ -408,6 +410,9 @@ struct ImageToImage: AsyncParsableCommand {
     @Flag(name: .long, help: "Show detailed performance profiling")
     var profile: Bool = false
 
+    @Flag(name: .long, help: "Show detailed logs (model loading, config, VLM interpretation)")
+    var verbose: Bool = false
+
     @Option(name: .long, help: "Model variant: dev (32B), klein-4b (4B, Apache 2.0), klein-9b (9B), klein-9b-kv (9B, KV-cached I2I)")
     var model: String = "dev"
 
@@ -443,6 +448,15 @@ struct ImageToImage: AsyncParsableCommand {
 
         // Configure custom models directory
         configureModelsDirectory(modelsDir)
+
+        // Configure logging verbosity
+        if verbose {
+            Flux2Debug.enableDebugMode()
+            FluxDebug.isEnabled = true
+        } else {
+            Flux2Debug.setNormalMode()
+            FluxDebug.isEnabled = false
+        }
 
         // Parse model variant
         guard let modelVariant = Flux2Model(rawValue: model) else {
@@ -516,7 +530,9 @@ struct ImageToImage: AsyncParsableCommand {
                 throw ValidationError("Failed to load image: \(path)")
             }
             refImages.append(image)
-            print("Loaded reference image: \(path) (\(image.width)x\(image.height))")
+            if verbose {
+                print("Loaded reference image: \(path) (\(image.width)x\(image.height))")
+            }
         }
 
         // Validate interpret image paths exist (VLM will load them directly)
@@ -526,24 +542,21 @@ struct ImageToImage: AsyncParsableCommand {
                 throw ValidationError("Interpret image not found: \(path)")
             }
             interpretImagePaths.append(path)
-            print("Will interpret image: \(path) [VLM analysis]")
+            if verbose {
+                print("Will interpret image: \(path) [VLM analysis]")
+            }
         }
-
-        print("Mode: Image-to-Image (Flux.2 conditioning)")
 
         // Show output dimensions
         let outputWidth = width ?? refImages[0].width
         let outputHeight = height ?? refImages[0].height
-        print("Output size: \(outputWidth)x\(outputHeight)")
 
-        // Note: Flux.2 I2I uses conditioning mode, not SD-style noise injection
-        // The reference image provides visual context to the transformer
-        // Strength parameter is accepted for API compatibility but doesn't skip timesteps
-        print("Steps: \(actualSteps)")
-        print("Guidance: \(actualGuidance)")
-
-        if upsamplePrompt {
-            print("Prompt upsampling: enabled")
+        print("I2I \(outputWidth)x\(outputHeight), \(actualSteps) steps, guidance \(actualGuidance), \(refImages.count) ref image(s)\(seed.map { ", seed \($0)" } ?? "")...")
+        if verbose {
+            print("  Prompt: \"\(prompt)\"")
+            if upsamplePrompt {
+                print("  Prompt upsampling: enabled")
+            }
         }
 
         // Parse quantization
@@ -571,7 +584,7 @@ struct ImageToImage: AsyncParsableCommand {
         }
 
         // Print LoRA info if specified
-        if let loraConfig = loraConfig {
+        if verbose, let loraConfig = loraConfig {
             print("LoRA: \(loraConfig.name) (scale: \(loraConfig.effectiveScale))")
             if let overrides = loraConfig.schedulerOverrides, overrides.hasOverrides {
                 if overrides.customSigmas != nil {
@@ -608,7 +621,9 @@ struct ImageToImage: AsyncParsableCommand {
         if let loraConfig = loraConfig {
             do {
                 let info = try pipeline.loadLoRA(loraConfig)
-                print("LoRA loaded: \(info.numLayers) layers, rank \(info.rank), \(String(format: "%.1f", info.memorySizeMB)) MB")
+                if verbose {
+                    print("LoRA loaded: \(info.numLayers) layers, rank \(info.rank), \(String(format: "%.1f", info.memorySizeMB)) MB")
+                }
                 if info.targetModel != .unknown {
                     if info.targetModel.rawValue != modelVariant.rawValue {
                         print("⚠️  Warning: LoRA was trained for \(info.targetModel.rawValue), but using \(modelVariant.rawValue)")
@@ -628,12 +643,12 @@ struct ImageToImage: AsyncParsableCommand {
                 atPath: checkpointDir!,
                 withIntermediateDirectories: true
             )
-            print("Checkpoints will be saved to: \(checkpointDir!)")
+            if verbose {
+                print("Checkpoints will be saved to: \(checkpointDir!)")
+            }
         } else {
             checkpointDir = nil
         }
-
-        print("Generating image...")
 
         let image = try await pipeline.generateImageToImage(
             prompt: prompt,

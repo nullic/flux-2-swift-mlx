@@ -186,54 +186,54 @@ public final class FluxTextEncoders: @unchecked Sendable {
     ///   - modelPath: Local path to Qwen3 model
     @MainActor
     public func loadKleinModel(variant: KleinVariant, from modelPath: String) async throws {
-        print("[Klein] Loading Qwen3 model for \(variant.displayName)")
-        print("[Klein] Model path: \(modelPath)")
+        FluxDebug.info("[Klein] Loading Qwen3 model for \(variant.displayName)")
+        FluxDebug.info("[Klein] Model path: \(modelPath)")
 
         // Verify path exists
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: modelPath) else {
-            print("[Klein] ERROR: Path does not exist: \(modelPath)")
+            FluxDebug.error("[Klein] Path does not exist: \(modelPath)")
             throw FluxEncoderError.invalidInput("Model path does not exist: \(modelPath)")
         }
 
         // Check for required files
         let configPath = "\(modelPath)/config.json"
         let tokenizerPath = "\(modelPath)/tokenizer.json"
-        print("[Klein] config.json exists: \(fileManager.fileExists(atPath: configPath))")
-        print("[Klein] tokenizer.json exists: \(fileManager.fileExists(atPath: tokenizerPath))")
+        FluxDebug.info("[Klein] config.json exists: \(fileManager.fileExists(atPath: configPath))")
+        FluxDebug.info("[Klein] tokenizer.json exists: \(fileManager.fileExists(atPath: tokenizerPath))")
 
         // Load Qwen3 model
-        print("[Klein] Loading model weights...")
+        FluxDebug.info("[Klein] Loading model weights...")
         qwen3Model = try Qwen3ForCausalLM.load(from: modelPath)
-        print("[Klein] Model weights loaded successfully")
+        FluxDebug.info("[Klein] Model weights loaded successfully")
 
         // CRITICAL: Limit GPU cache to prevent memory accumulation during repeated inference
         // This is essential for training where encode() is called many times
         // Without this limit, the GPU cache grows unbounded
         Memory.cacheLimit = 512 * 1024 * 1024  // 512 MB cache limit
-        print("[Klein] GPU cache limit set to 512 MB")
+        FluxDebug.info("[Klein] GPU cache limit set to 512 MB")
 
         // Enable AGGRESSIVE memory optimization to prevent computation graph accumulation
         // Use aggressive preset: eval every 4 layers with cache clearing
         qwen3Model?.model.memoryConfig = .aggressive
-        print("[Klein] Memory optimization enabled (aggressive: eval every 4 layers + cache clear)")
+        FluxDebug.info("[Klein] Memory optimization enabled (aggressive: eval every 4 layers + cache clear)")
 
         // Load tokenizer using HuggingFace Tokenizers library
         // Use from(modelFolder:) for local paths (not from(pretrained:) which treats path as Hub ID)
-        print("[Klein] Loading tokenizer from local path...")
+        FluxDebug.info("[Klein] Loading tokenizer from local path...")
         let modelFolderURL = URL(fileURLWithPath: modelPath)
         qwen3Tokenizer = try await AutoTokenizer.from(modelFolder: modelFolderURL)
-        print("[Klein] Tokenizer loaded successfully")
+        FluxDebug.info("[Klein] Tokenizer loaded successfully")
 
         // Create Klein embedding extractor and Qwen3 generator
         if let model = qwen3Model, let tokenizer = qwen3Tokenizer {
             kleinExtractor = KleinEmbeddingExtractor(model: model, tokenizer: tokenizer, variant: variant)
             qwen3Generator = Qwen3Generator(model: model, tokenizer: tokenizer)
             loadedKleinVariant = variant
-            print("[Klein] Extractor and generator created")
+            FluxDebug.info("[Klein] Extractor and generator created")
         }
 
-        print("[Klein] Klein model loaded successfully for \(variant.displayName)")
+        FluxDebug.info("[Klein] Klein model loaded successfully for \(variant.displayName)")
     }
     
     /// Load Qwen3 model for Klein embeddings with automatic download
@@ -262,13 +262,13 @@ public final class FluxTextEncoders: @unchecked Sendable {
             throw FluxEncoderError.invalidInput("Qwen3 model variant not found: \(modelVariant)")
         }
 
-        print("[Klein] Loading variant: \(modelVariant), repoId: \(modelInfo.repoId)")
+        FluxDebug.info("[Klein] Loading variant: \(modelVariant), repoId: \(modelInfo.repoId)")
 
         // Download model (or get existing path)
         let downloader = TextEncoderModelDownloader(hfToken: hfToken)
         let modelPath = try await downloader.downloadQwen3(modelInfo, progress: progress)
 
-        print("[Klein] Model path resolved: \(modelPath.path)")
+        FluxDebug.info("[Klein] Model path resolved: \(modelPath.path)")
 
         // Load from downloaded path
         try await loadKleinModel(variant: variant, from: modelPath.path)
@@ -298,8 +298,8 @@ public final class FluxTextEncoders: @unchecked Sendable {
     /// This replaces the standard Qwen3 text encoder with Qwen3-VL (language component only)
     @MainActor
     public func loadKleinVLModel(variant: KleinVariant, from modelPath: String) async throws {
-        print("[Klein-VL] Loading Qwen3-VL model for \(variant.displayName)")
-        print("[Klein-VL] Model path: \(modelPath)")
+        FluxDebug.info("[Klein-VL] Loading Qwen3-VL model for \(variant.displayName)")
+        FluxDebug.info("[Klein-VL] Model path: \(modelPath)")
 
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: modelPath) else {
@@ -307,19 +307,19 @@ public final class FluxTextEncoders: @unchecked Sendable {
         }
 
         // Load Qwen3-VL model (language component only — skips visual.* weights)
-        print("[Klein-VL] Loading model weights (language only, skipping vision encoder)...")
+        FluxDebug.info("[Klein-VL] Loading model weights (language only, skipping vision encoder)...")
         qwen3VLModel = try Qwen3VLForCausalLM.load(from: modelPath)
-        print("[Klein-VL] Model weights loaded successfully")
+        FluxDebug.info("[Klein-VL] Model weights loaded successfully")
 
         Memory.cacheLimit = 512 * 1024 * 1024
         qwen3VLModel?.model.memoryConfig = .aggressive
-        print("[Klein-VL] Memory optimization enabled")
+        FluxDebug.info("[Klein-VL] Memory optimization enabled")
 
         // Load tokenizer
-        print("[Klein-VL] Loading tokenizer...")
+        FluxDebug.info("[Klein-VL] Loading tokenizer...")
         let modelFolderURL = URL(fileURLWithPath: modelPath)
         qwen3VLTokenizer = try await AutoTokenizer.from(modelFolder: modelFolderURL)
-        print("[Klein-VL] Tokenizer loaded")
+        FluxDebug.info("[Klein-VL] Tokenizer loaded")
 
         // Create VL embedding extractor and generator
         if let model = qwen3VLModel, let tokenizer = qwen3VLTokenizer {
@@ -327,10 +327,10 @@ public final class FluxTextEncoders: @unchecked Sendable {
             qwen3VLGenerator = Qwen3VLGenerator(model: model, tokenizer: tokenizer)
             loadedKleinVariant = variant
             isKleinVLMode = true
-            print("[Klein-VL] VL extractor and generator created")
+            FluxDebug.info("[Klein-VL] VL extractor and generator created")
         }
 
-        print("[Klein-VL] Klein VL model loaded successfully for \(variant.displayName)")
+        FluxDebug.info("[Klein-VL] Klein VL model loaded successfully for \(variant.displayName)")
     }
 
     /// Load Qwen3-VL model for Klein VL embeddings with automatic download
@@ -361,13 +361,13 @@ public final class FluxTextEncoders: @unchecked Sendable {
             throw FluxEncoderError.invalidInput("Qwen3-VL model variant not found: \(modelVariant)")
         }
 
-        print("[Klein-VL] Loading variant: \(modelVariant), repoId: \(modelInfo.repoId)")
+        FluxDebug.info("[Klein-VL] Loading variant: \(modelVariant), repoId: \(modelInfo.repoId)")
 
         // Download model (or get existing path)
         let downloader = TextEncoderModelDownloader(hfToken: hfToken)
         let modelPath = try await downloader.downloadQwen3VL(modelInfo, progress: progress)
 
-        print("[Klein-VL] Model path resolved: \(modelPath.path)")
+        FluxDebug.info("[Klein-VL] Model path resolved: \(modelPath.path)")
 
         // Load from downloaded path
         try await loadKleinVLModel(variant: variant, from: modelPath.path)
@@ -406,12 +406,12 @@ public final class FluxTextEncoders: @unchecked Sendable {
     /// Load Qwen3.5 VLM from local path
     @MainActor
     public func loadQwen35VLM(from modelPath: String) async throws {
-        print("[Qwen3.5] Loading VLM from \(modelPath)...")
+        FluxDebug.info("[Qwen3.5] Loading VLM from \(modelPath)...")
 
         Memory.cacheLimit = 512 * 1024 * 1024
         qwen35VLM = try await Qwen35VLM.load(from: modelPath)
 
-        print("[Qwen3.5] VLM loaded successfully")
+        FluxDebug.info("[Qwen3.5] VLM loaded successfully")
     }
 
     /// Unload Qwen3.5 VLM

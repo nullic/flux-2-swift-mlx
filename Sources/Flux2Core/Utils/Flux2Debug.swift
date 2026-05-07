@@ -20,8 +20,8 @@ public enum Flux2Debug {
         }
     }
 
-    /// Minimum log level to display (default: info - show progress and above)
-    nonisolated(unsafe) public static var minLevel: Level = .info
+    /// Minimum log level to display (default: warning - quiet mode, use enableDebugMode() for verbose)
+    nonisolated(unsafe) public static var minLevel: Level = .warning
 
     /// Enable debug mode (shows all logs including verbose)
     public static func enableDebugMode() {
