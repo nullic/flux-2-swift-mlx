@@ -62,9 +62,12 @@ public enum ModelRegistry {
                 return "transformer"
             case .qint8:
                 return "flux-2-dev/transformer/qint8"
-            case .klein4B_bf16, .klein4B_8bit, .klein4B_base_bf16, .klein9B_bf16, .klein9B_base_bf16, .klein9B_kv_bf16:
-                // Klein models have transformer weights in root folder
+            case .klein4B_bf16, .klein4B_8bit, .klein9B_bf16, .klein9B_kv_bf16:
+                // Klein distilled/community models have transformer weights in root folder
                 return nil
+            case .klein4B_base_bf16, .klein9B_base_bf16:
+                // Klein base models (official BFL repos) use diffusers layout with transformer/ subfolder
+                return "transformer"
             }
         }
 
