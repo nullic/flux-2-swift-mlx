@@ -15,6 +15,35 @@ public class Flux2ModelDownloader: @unchecked Sendable {
     /// URLSession for downloads
     private let session: URLSession
 
+    /// Sticky byte-level progress observer — set per-file inside
+    /// `downloadFile`, read from the URLSession delegate's
+    /// `didWriteData` callbacks, and torn down before the file's
+    /// download returns. Kept on the downloader rather than on the
+    /// session so a single `URLSession` instance can serve every
+    /// file in `downloadAll` without leaking delegate state.
+    private final class ByteProgressDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+        var onProgress: (@Sendable (Int64, Int64) -> Void)?
+
+        func urlSession(_ session: URLSession,
+                        downloadTask: URLSessionDownloadTask,
+                        didWriteData bytesWritten: Int64,
+                        totalBytesWritten: Int64,
+                        totalBytesExpectedToWrite: Int64)
+        {
+            onProgress?(totalBytesWritten, totalBytesExpectedToWrite)
+        }
+
+        // `URLSession.download(for:)` still requires the delegate
+        // protocol's `didFinishDownloadingTo` to be implemented even
+        // though Foundation handles the actual file management.
+        // Empty body is fine — the async API consumes the result.
+        func urlSession(_ session: URLSession,
+                        downloadTask: URLSessionDownloadTask,
+                        didFinishDownloadingTo location: URL) {}
+    }
+
+    private let byteProgressDelegate: ByteProgressDelegate
+
     public init(hfToken: String? = nil) {
         self.hfToken = hfToken
         if let token = hfToken {
@@ -23,7 +52,12 @@ public class Flux2ModelDownloader: @unchecked Sendable {
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForResource = 3600  // 1 hour for large models
-        self.session = URLSession(configuration: config)
+        let delegate = ByteProgressDelegate()
+        self.byteProgressDelegate = delegate
+        // OperationQueue.main keeps delegate callbacks serialised
+        // on a known thread — `onProgress` is just doing a callback
+        // hop, no UI work needed beyond that.
+        self.session = URLSession(configuration: config, delegate: delegate, delegateQueue: OperationQueue())
     }
 
     // MARK: - Model Paths
@@ -219,10 +253,24 @@ public class Flux2ModelDownloader: @unchecked Sendable {
             let fileName = URL(fileURLWithPath: file).lastPathComponent
             progress?(Double(index) / Double(totalFiles), "Downloading \(fileName)...")
 
+            // Byte-level overall progress within this file.
+            // `completedFraction` is fixed for the file's lifetime;
+            // `fileFraction` walks 0→1 as `didWriteData` fires.
+            // Overall = completed + fileFraction × per-file slice.
+            let completedFraction = Double(index) / Double(totalFiles)
+            let perFileSlice = 1.0 / Double(totalFiles)
+            let progressForFile: @Sendable (Int64, Int64) -> Void = { written, total in
+                guard total > 0 else { return }
+                let fileFraction = Double(written) / Double(total)
+                let overall = completedFraction + fileFraction * perFileSlice
+                progress?(overall, "Downloading \(fileName) (\(Self.formatSize(written)) / \(Self.formatSize(total)))")
+            }
+
             let fileURL = try await downloadFile(
                 repoId: repoId,
                 filePath: file,
-                to: destDir.appendingPathComponent(fileName)
+                to: destDir.appendingPathComponent(fileName),
+                byteProgress: progressForFile
             )
 
             if let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
@@ -303,8 +351,18 @@ public class Flux2ModelDownloader: @unchecked Sendable {
         return files
     }
 
-    /// Download a single file from HuggingFace
-    private func downloadFile(repoId: String, filePath: String, to destination: URL) async throws -> URL {
+    /// Download a single file from HuggingFace. `byteProgress`
+    /// receives `(downloaded, total)` byte tuples roughly every
+    /// 64 KB while the file is in flight — set on `download(_:progress:)`'s
+    /// per-component loop so the outer `Flux2DownloadProgressCallback`
+    /// can interpolate within-file progress instead of only ticking
+    /// at file-boundary transitions.
+    private func downloadFile(
+        repoId: String,
+        filePath: String,
+        to destination: URL,
+        byteProgress: (@Sendable (Int64, Int64) -> Void)? = nil
+    ) async throws -> URL {
         let urlString = "https://huggingface.co/\(repoId)/resolve/main/\(filePath)"
 
         guard let url = URL(string: urlString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? urlString) else {
@@ -315,6 +373,13 @@ public class Flux2ModelDownloader: @unchecked Sendable {
         if let token = hfToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+
+        // Wire byte-level progress for the duration of this file's
+        // download. `URLSession.download(for:)` invokes the
+        // delegate's `didWriteData` as bytes stream in even though
+        // the async API hides the underlying download task.
+        byteProgressDelegate.onProgress = byteProgress
+        defer { byteProgressDelegate.onProgress = nil }
 
         let (tempURL, response) = try await session.download(for: request)
 
