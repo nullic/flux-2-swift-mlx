@@ -18,7 +18,13 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.30.2"),
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.2.0"),
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.1.6"),
-        .package(url: "https://github.com/jpsim/Yams", from: "5.1.0"),
+        // Widened from `from: "5.1.0"` (== `5.1.0..<6.0.0`) to
+        // `5.1.0..<7.0.0` so this package composes with Yams 6.x
+        // consumers downstream. Yams is only used by `Flux2CLI`
+        // for YAML config files — `Flux2Core` library doesn't link
+        // Yams, so dependents that pick up the 6.x resolution
+        // don't see any API surface change.
+        .package(url: "https://github.com/jpsim/Yams", "5.1.0" ..< "7.0.0"),
         .package(url: "https://github.com/VincentGourbin/swift-mlx-profiler", from: "1.1.1"),
     ],
     targets: [
